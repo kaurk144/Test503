@@ -1,14 +1,4 @@
-name: Deploy CivicNexus CloudFormation Stack
-
-on:
-  workflow_dispatch:
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repo
-        uses: actAWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: '2010-09-09'
 Description: 'CloudFormation stack for the 503AZ CivicNexus Innovations Group Project. Creates a scalable and deliberately insecure smart city environment with a self-hosted MongoDB on EC2.'
 
 Parameters:
@@ -567,79 +557,4 @@ Outputs:
     Condition: CreateVDI
     Value: !Ref VDIInstance
 
-
-
-ions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: us-east-1
-
-      - name: Deploy Main CivicNexus Stack
-        run: |
-          aws cloudformation deploy \
-            --stack-name ${{ secrets.GROUP_NAME }}-civicnexus-stack \
-            --template-file cfstack.yml \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides \
-              GroupName=${{ secrets.GROUP_NAME }} \
-              GroupSize=${{ secrets.GROUP_SIZE }} \
-              MongoAdminPassword=${{ secrets.MONGO_ADMIN_PASSWORD }} \
-              KeyName=${{ secrets.KEY_NAME }}
-
-      - name: Install MongoDB Shell
-        run: |
-          wget -qO- https://www.mongodb.org/static/pgp/server-7.0.asc | sudo tee /etc/apt/trusted.gpg.d/server-7.0.asc
-          echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-          sudo apt-get update
-          sudo apt-get install -y mongodb-mongosh
-
-      - name: Get MongoDB Instance ID
-        run: |
-          DB_INSTANCE_ID=$(aws cloudformation describe-stacks \
-            --stack-name ${{ secrets.GROUP_NAME }}-civicnexus-stack \
-            --query "Stacks[0].Outputs[?OutputKey=='MongoInstanceId'].OutputValue" \
-            --output text)
-          echo "DB_INSTANCE_ID=$DB_INSTANCE_ID" >> $GITHUB_ENV
-      
-      - name: Wait for SSM
-        run: |
-          echo "Waiting for SSM to be ready..."
-          for i in {1..20}; do
-            STATUS=$(aws ssm describe-instance-information \
-              --filters "Key=InstanceIds,Values=${{ env.DB_INSTANCE_ID }}" \
-              --query 'InstanceInformationList[0].PingStatus' \
-              --output text)
-            echo "SSM status: $STATUS"
-            if [ "$STATUS" = "Online" ]; then
-              echo "SSM is ready"
-              break
-            fi
-            sleep 15
-          done
-      
-      - name: Load Data into MongoDB
-        run: |
-          ENCODED=$(base64 -w 0 DBLoad.js)
-          aws ssm send-command \
-            --instance-id ${{ env.DB_INSTANCE_ID }} \
-            --document-name "AWS-RunShellScript" \
-            --parameters commands=["echo $ENCODED | base64 -d > /tmp/DBLoad.js"]
-          
-          sleep 5
-          
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-id ${{ env.DB_INSTANCE_ID }} \
-            --document-name "AWS-RunShellScript" \
-            --parameters commands=["mongosh mongodb://localhost:27017 < /tmp/DBLoad.js"] \
-            --output text \
-            --query 'Command.CommandId')
-          
-          aws ssm wait command-executed \
-            --command-id $COMMAND_ID \
-            --instance-id ${{ env.DB_INSTANCE_ID }}
 
